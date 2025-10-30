@@ -396,6 +396,12 @@ fn run_formatter(input: &str, command: &[String]) -> Result<FormatterOutcome> {
         stdin
             .write_all(input.as_bytes())
             .context("writing formatter input")?;
+
+        if !input.ends_with('\n') {
+            stdin
+                .write_all(b"\n")
+                .context("appending trailing newline to formatter input")?;
+        }
     } else {
         return Err(anyhow!("failed to open stdin"));
     }
