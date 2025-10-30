@@ -43,7 +43,15 @@ struct Replacement {
 #[derive(Debug)]
 enum FormatterOutcome {
     Formatted(String),
+    FormattedWithWarnings { formatted: String, stderr: String },
     FormatterErrored { stderr: String },
+}
+
+#[derive(Debug)]
+struct FormatterCommandOutput {
+    stdout: String,
+    stderr: String,
+    success: bool,
 }
 
 pub struct Formatter {
@@ -120,7 +128,7 @@ fn replacements(
     let mut replacements = Vec::with_capacity(captures.len());
 
     for cap in captures {
-        match format_literal_with_command(&cap, command)? {
+        match format_literal_with_command(&cap, command, ignore_exit_code)? {
             FormatterOutcome::Formatted(formatted) if formatted != cap.literal.raw_input() => {
                 replacements.push(Replacement {
                     span: cap.span.clone(),
@@ -128,6 +136,24 @@ fn replacements(
                 });
             }
             FormatterOutcome::Formatted(_) => {}
+            FormatterOutcome::FormattedWithWarnings { formatted, stderr } => {
+                eprintln!(
+                    "[WARN] {}:{}: formatter exited with non-zero status (ignored)",
+                    path.display(),
+                    cap.line
+                );
+
+                if !stderr.trim().is_empty() {
+                    print_indented_lines(stderr.trim_end());
+                }
+
+                if formatted != cap.literal.raw_input() {
+                    replacements.push(Replacement {
+                        span: cap.span.clone(),
+                        text: formatted,
+                    });
+                }
+            }
             FormatterOutcome::FormatterErrored { stderr } => {
                 eprintln!(
                     "[WARN] {}:{}: error from formatter",
@@ -135,7 +161,9 @@ fn replacements(
                     cap.line
                 );
 
-                print_indented_lines(stderr.trim_end());
+                if !stderr.trim().is_empty() {
+                    print_indented_lines(stderr.trim_end());
+                }
                 if !ignore_exit_code {
                     *had_errors = true;
                 }
@@ -165,15 +193,29 @@ fn apply_replacements(mut replacements: Vec<Replacement>, src: &str) -> String {
 fn format_literal_with_command(
     literal: &LiteralCapture,
     command: &[String],
+    ignore_exit_code: bool,
 ) -> Result<FormatterOutcome> {
     let content = normalized_content_for_formatter(&literal.literal);
 
-    match run_formatter(&content, command)? {
-        FormatterOutcome::Formatted(formatted) => Ok(FormatterOutcome::Formatted(rewrite_literal(
-            &formatted, literal,
-        ))),
-        e @ FormatterOutcome::FormatterErrored { .. } => Ok(e),
+    let output = run_formatter(&content, command)?;
+
+    if output.success {
+        return Ok(FormatterOutcome::Formatted(rewrite_literal(
+            &output.stdout,
+            literal,
+        )));
     }
+
+    if ignore_exit_code {
+        return Ok(FormatterOutcome::FormattedWithWarnings {
+            formatted: rewrite_literal(&output.stdout, literal),
+            stderr: output.stderr,
+        });
+    }
+
+    Ok(FormatterOutcome::FormatterErrored {
+        stderr: output.stderr,
+    })
 }
 
 fn rewrite_literal(formatted: &str, literal: &LiteralCapture) -> String {
@@ -378,7 +420,7 @@ fn literal_capture_from_node(
     }
 }
 
-fn run_formatter(input: &str, command: &[String]) -> Result<FormatterOutcome> {
+fn run_formatter(input: &str, command: &[String]) -> Result<FormatterCommandOutput> {
     let (program, args) = command
         .split_first()
         .ok_or_else(|| anyhow!("formatter command cannot be empty"))?;
@@ -410,13 +452,14 @@ fn run_formatter(input: &str, command: &[String]) -> Result<FormatterOutcome> {
         .wait_with_output()
         .context("waiting for formatter command")?;
 
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr).into_owned();
-        return Ok(FormatterOutcome::FormatterErrored { stderr: err });
-    }
-
     let stdout = String::from_utf8(output.stdout).context("formatter command stdout not UTF-8")?;
-    Ok(FormatterOutcome::Formatted(stdout))
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+    Ok(FormatterCommandOutput {
+        stdout,
+        stderr,
+        success: output.status.success(),
+    })
 }
 
 fn strip_indent(block: &str, indent: &str) -> String {
