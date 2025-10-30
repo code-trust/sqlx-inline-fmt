@@ -51,10 +51,11 @@ pub struct Formatter {
     query: Query,
     command: Vec<String>,
     had_errors: bool,
+    ignore_exit_code: bool,
 }
 
 impl Formatter {
-    pub fn new(command: Vec<String>) -> Result<Self> {
+    pub fn new(command: Vec<String>, ignore_exit_code: bool) -> Result<Self> {
         let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
 
         let mut parser = Parser::new();
@@ -70,6 +71,7 @@ impl Formatter {
             query,
             command,
             had_errors: false,
+            ignore_exit_code,
         })
     }
 
@@ -85,6 +87,7 @@ impl Formatter {
             &mut self.parser,
             &self.query,
             &self.command,
+            self.ignore_exit_code,
             &mut self.had_errors,
         )?;
 
@@ -109,6 +112,7 @@ fn replacements(
     parser: &mut Parser,
     query: &Query,
     command: &[String],
+    ignore_exit_code: bool,
     had_errors: &mut bool,
 ) -> Result<Vec<Replacement>> {
     let captures = collect_literal_captures(path, src, parser, query, had_errors)?;
@@ -132,7 +136,9 @@ fn replacements(
                 );
 
                 print_indented_lines(stderr.trim_end());
-                *had_errors = true;
+                if !ignore_exit_code {
+                    *had_errors = true;
+                }
             }
         }
     }

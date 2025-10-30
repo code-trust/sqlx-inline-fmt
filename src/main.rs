@@ -33,6 +33,10 @@ struct Args {
     /// Formatter command to run
     #[arg(long = "formatter", value_name = "COMMAND")]
     formatter: String,
+
+    /// Ignore non-zero exit codes from the formatter command
+    #[arg(long)]
+    ignore_exit_code: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,7 +79,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut formatter = Formatter::new(formatter_command)?;
+    let mut formatter = Formatter::new(formatter_command, args.ignore_exit_code)?;
     let mode: Mode = args.check.into();
     let mut any_changes = false;
 
