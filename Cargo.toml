@@ -9,9 +9,9 @@ repository = "https://github.com/code-trust/sqlx-inline-fmt"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-litrs = "0.5"
+litrs = "1.0"
 shlex = "1"
-tree-sitter = "0.25"
+tree-sitter = "0.26"
 tree-sitter-rust = "0.24"
 walkdir = "2"
 
