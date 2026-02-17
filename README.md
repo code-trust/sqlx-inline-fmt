@@ -6,10 +6,10 @@ in place.
 
 ## Installation
 
-Clone the repository and install the tool with Cargo:
+Install from crates.io:
 
 ```bash
-cargo install --path .
+cargo install sqlx-inline-fmt
 ```
 
 ## Usage
