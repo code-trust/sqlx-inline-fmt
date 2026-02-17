@@ -222,10 +222,12 @@ fn rewrite_literal(formatted: &str, literal: &LiteralCapture) -> String {
     let trimmed_end = formatted.trim_end_matches('\n');
 
     if !trimmed_end.contains('\n') {
-        let mut out = String::from('"');
-        out.push_str(&escape_regular_string(trimmed_end));
-        out.push('"');
-        return out;
+        return if trimmed_end.contains('"') {
+            let hashes = "#".repeat(required_raw_hashes(trimmed_end));
+            format!("r{hashes}\"{trimmed_end}\"{hashes}")
+        } else {
+            format!(r#""{}""#, escape_regular_string(trimmed_end))
+        };
     }
 
     let hashes = "#".repeat(required_raw_hashes(formatted));
