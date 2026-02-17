@@ -13,13 +13,15 @@
       let
         pkgs = import nixpkgs { inherit system; };
         lib = pkgs.lib;
+        cargo = lib.importTOML ./Cargo.toml;
+        pkg = cargo.package;
       in
       {
         formatter = pkgs.nixfmt-rfc-style;
 
         packages.default = pkgs.rustPlatform.buildRustPackage rec {
-          pname = "sqlx-inline-fmt";
-          version = "0.2.0";
+          pname = pkg.name;
+          version = pkg.version;
           src = lib.cleanSource ./.;
 
           cargoLock = {
@@ -27,10 +29,10 @@
           };
 
           meta = with lib; {
-            description = "Format inline sqlx query strings in Rust";
-            homepage = "https://github.com/code-trust/sqlx-inline-fmt";
+            description = pkg.description;
+            homepage = pkg.repository;
             license = licenses.mit;
-            mainProgram = "sqlx-inline-fmt";
+            mainProgram = pname;
             platforms = platforms.unix;
           };
         };
