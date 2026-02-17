@@ -3,6 +3,8 @@ name = "sqlx-inline-fmt"
 version = "0.2.0"
 edition = "2024"
 description = "Format inline sqlx query strings in Rust"
+categories = ["command-line-utilities", "development-tools"]
+keywords = ["cli", "formatter", "sqlx"]
 license = "MIT"
 repository = "https://github.com/code-trust/sqlx-inline-fmt"
 
