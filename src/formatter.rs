@@ -54,16 +54,24 @@ struct FormatterCommandOutput {
     success: bool,
 }
 
+/// How each literal is sent to the external formatter and written back.
+#[derive(Debug, Clone)]
+pub struct FormatOptions {
+    pub command: Vec<String>,
+    pub ignore_exit_code: bool,
+    /// Minimum number of `#`s on raw string literals the tool writes
+    pub min_hashes: usize,
+}
+
 pub struct Formatter {
     parser: Parser,
     query: Query,
-    command: Vec<String>,
+    options: FormatOptions,
     had_errors: bool,
-    ignore_exit_code: bool,
 }
 
 impl Formatter {
-    pub fn new(command: Vec<String>, ignore_exit_code: bool) -> Result<Self> {
+    pub fn new(options: FormatOptions) -> Result<Self> {
         let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
 
         let mut parser = Parser::new();
@@ -77,9 +85,8 @@ impl Formatter {
         Ok(Self {
             parser,
             query,
-            command,
+            options,
             had_errors: false,
-            ignore_exit_code,
         })
     }
 
@@ -94,8 +101,7 @@ impl Formatter {
             &source,
             &mut self.parser,
             &self.query,
-            &self.command,
-            self.ignore_exit_code,
+            &self.options,
             &mut self.had_errors,
         )?;
 
@@ -119,8 +125,7 @@ fn replacements(
     src: &str,
     parser: &mut Parser,
     query: &Query,
-    command: &[String],
-    ignore_exit_code: bool,
+    options: &FormatOptions,
     had_errors: &mut bool,
 ) -> Result<Vec<Replacement>> {
     let captures = collect_literal_captures(path, src, parser, query, had_errors)?;
@@ -128,7 +133,7 @@ fn replacements(
     let mut replacements = Vec::with_capacity(captures.len());
 
     for cap in captures {
-        match format_literal_with_command(&cap, command, ignore_exit_code)? {
+        match format_literal_with_command(&cap, options)? {
             FormatterOutcome::Formatted(formatted) if formatted != cap.literal.raw_input() => {
                 replacements.push(Replacement {
                     span: cap.span.clone(),
@@ -164,7 +169,7 @@ fn replacements(
                 if !stderr.trim().is_empty() {
                     print_indented_lines(stderr.trim_end());
                 }
-                if !ignore_exit_code {
+                if !options.ignore_exit_code {
                     *had_errors = true;
                 }
             }
@@ -192,23 +197,23 @@ fn apply_replacements(mut replacements: Vec<Replacement>, src: &str) -> String {
 
 fn format_literal_with_command(
     literal: &LiteralCapture,
-    command: &[String],
-    ignore_exit_code: bool,
+    options: &FormatOptions,
 ) -> Result<FormatterOutcome> {
     let content = normalized_content_for_formatter(&literal.literal);
 
-    let output = run_formatter(&content, command)?;
+    let output = run_formatter(&content, &options.command)?;
 
     if output.success {
         return Ok(FormatterOutcome::Formatted(rewrite_literal(
             &output.stdout,
             literal,
+            options.min_hashes,
         )));
     }
 
-    if ignore_exit_code {
+    if options.ignore_exit_code {
         return Ok(FormatterOutcome::FormattedWithWarnings {
-            formatted: rewrite_literal(&output.stdout, literal),
+            formatted: rewrite_literal(&output.stdout, literal, options.min_hashes),
             stderr: output.stderr,
         });
     }
@@ -218,19 +223,21 @@ fn format_literal_with_command(
     })
 }
 
-fn rewrite_literal(formatted: &str, literal: &LiteralCapture) -> String {
+/// Rewrites formatted SQL as a Rust string literal. Raw string literals get at
+/// least `min_hashes` `#`s, or more when the SQL itself requires them.
+fn rewrite_literal(formatted: &str, literal: &LiteralCapture, min_hashes: usize) -> String {
     let trimmed_end = formatted.trim_end_matches('\n');
 
     if !trimmed_end.contains('\n') {
         return if trimmed_end.contains('"') {
-            let hashes = "#".repeat(required_raw_hashes(trimmed_end));
+            let hashes = "#".repeat(required_raw_hashes(trimmed_end).max(min_hashes));
             format!("r{hashes}\"{trimmed_end}\"{hashes}")
         } else {
             format!(r#""{}""#, escape_regular_string(trimmed_end))
         };
     }
 
-    let hashes = "#".repeat(required_raw_hashes(formatted));
+    let hashes = "#".repeat(required_raw_hashes(formatted).max(min_hashes));
     let mut out =
         String::with_capacity(formatted.len() + literal.indent.len() * 2 + hashes.len() * 2 + 4);
 
@@ -538,5 +545,56 @@ fn required_raw_hashes(content: &str) -> usize {
 fn print_indented_lines(s: &str) {
     for line in s.lines() {
         eprintln!("  {line}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn capture(source: &str, indent: &str) -> LiteralCapture {
+        LiteralCapture {
+            span: 0..source.len(),
+            literal: StringLit::parse(source.to_owned()).expect("valid string literal"),
+            line: 1,
+            indent: indent.to_owned(),
+        }
+    }
+
+    #[test]
+    fn multi_line_raw_literals_use_the_fewest_hashes_by_default() {
+        let literal = capture(r#""SELECT 1""#, "    ");
+
+        assert_eq!(
+            rewrite_literal("SELECT\n  1\n", &literal, 0),
+            "r\"\n    SELECT\n      1\n    \""
+        );
+    }
+
+    #[test]
+    fn multi_line_raw_literals_keep_the_minimum_hashes() {
+        let literal = capture(r#""SELECT 1""#, "    ");
+
+        assert_eq!(
+            rewrite_literal("SELECT\n  1\n", &literal, 1),
+            "r#\"\n    SELECT\n      1\n    \"#"
+        );
+    }
+
+    #[test]
+    fn sql_that_needs_more_hashes_than_the_minimum_gets_them() {
+        let literal = capture(r#""SELECT 1""#, "");
+
+        assert_eq!(
+            rewrite_literal("SELECT\n  '\"#'\n", &literal, 1),
+            "r##\"\nSELECT\n  '\"#'\n\"##"
+        );
+    }
+
+    #[test]
+    fn single_line_sql_without_quotes_stays_a_plain_string() {
+        let literal = capture(r#""select 1""#, "");
+
+        assert_eq!(rewrite_literal("SELECT 1\n", &literal, 1), r#""SELECT 1""#);
     }
 }

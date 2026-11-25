@@ -6,7 +6,7 @@ use std::process;
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
-use formatter::{FileChange, Formatter};
+use formatter::{FileChange, FormatOptions, Formatter};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -37,6 +37,10 @@ struct Args {
     /// Ignore non-zero exit codes from the formatter command
     #[arg(long)]
     ignore_exit_code: bool,
+
+    /// Minimum number of `#`s on raw string literals the tool writes
+    #[arg(long, value_name = "N", default_value_t = 0)]
+    min_hashes: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +83,11 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut formatter = Formatter::new(formatter_command, args.ignore_exit_code)?;
+    let mut formatter = Formatter::new(FormatOptions {
+        command: formatter_command,
+        ignore_exit_code: args.ignore_exit_code,
+        min_hashes: args.min_hashes,
+    })?;
     let mode: Mode = args.check.into();
     let mut any_changes = false;
 
