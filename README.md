@@ -27,6 +27,9 @@ sqlx-inline-fmt [OPTIONS] --formatter "<COMMAND>" [INPUTS]...
   with code 1 if any file would change (useful for CI).
 * **-v, --verbose**: Include `ok` entries in per-file status output.
 * **-q, --quiet**: Suppress per-file status lines; only print warnings/errors.
+* **--min-hashes \<N\>**: Write raw string literals with at least `N` `#`s, for
+  example `--min-hashes 1` for `r#"..."#`. Defaults to 0, the fewest the SQL
+  allows. Single-line SQL without quotes stays a regular string literal.
 
 ### Examples
 
